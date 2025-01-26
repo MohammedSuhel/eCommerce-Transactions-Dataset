@@ -1,0 +1,56 @@
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+# Load data
+customers = pd.read_csv(r"C:\Downloads\Customers.csv")
+products = pd.read_csv(r"C:\Downloads\Products.csv")
+transactions = pd.read_csv(r"C:\Downloads\Transactions.csv")
+
+# Merge data into one dataframe
+data = transactions.merge(customers, on="CustomerID").merge(products, on="ProductID")
+
+# Create customer profile features
+customer_features = data.groupby('CustomerID').agg({
+    'TotalValue': 'sum',  # Total value spent
+    'Region': 'first'  # Region info from Customers.csv
+}).reset_index()
+
+# Create a combined features column for text vectorization (concatenate Region and Product IDs)
+customer_features['combined_features'] = customer_features['Region'] + ' ' + customer_features['TotalValue'].astype(str)
+
+# Use TF-IDF to vectorize the customer profiles
+vectorizer = TfidfVectorizer()
+feature_matrix = vectorizer.fit_transform(customer_features['combined_features'])
+
+# Calculate cosine similarity between customer profiles
+similarity_matrix = cosine_similarity(feature_matrix)
+
+# Create lookalike recommendations for each customer
+lookalike_map = {}
+
+for idx, row in customer_features.iterrows():
+    customer_id = row['CustomerID']
+    # Get similarity scores for this customer
+    similarity_scores = similarity_matrix[idx]
+    
+    # Get indices of top 3 most similar customers, excluding the customer itself
+    similar_indices = similarity_scores.argsort()[-4:-1]  # Top 3 excluding self
+    similar_customers = customer_features.iloc[similar_indices]
+    
+    # Map lookalike customers with similarity scores
+    lookalike_map[customer_id] = [
+        (row.CustomerID, similarity_scores[idx]) for idx, row in zip(similar_indices, similar_customers.itertuples())
+    ]
+
+# Format lookalike data for CSV output
+lookalike_data = []
+for customer_id, similar_customers in lookalike_map.items():
+    for similar_customer_id, score in similar_customers:
+        lookalike_data.append([customer_id, similar_customer_id, score])
+
+# Convert the data into a DataFrame and save to CSV
+lookalike_df = pd.DataFrame(lookalike_data, columns=['cust_id', 'lookalike_cust_id', 'similarity_score'])
+lookalike_df.to_csv('FirstName_LastName_Lookalike.csv', index=False)
+
+print("Lookalike model completed. Results saved to 'FirstName_LastName_Lookalike.csv'.")
